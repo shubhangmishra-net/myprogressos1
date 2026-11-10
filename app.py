@@ -1,157 +1,118 @@
-from __future__ import annotations
-
-import hashlib
-import hmac
-import json
-import os
-import sqlite3
-from contextlib import contextmanager
-from datetime import date, datetime, timedelta
-from pathlib import Path
-from typing import Any
-from zoneinfo import ZoneInfo
-
-import pandas as pd
-import streamlit as st
-from dotenv import load_dotenv
-
-APP_DIR = Path(__file__).resolve().parent
-load_dotenv(APP_DIR / ".env")
-DATA_DIR = Path(os.getenv("PLANNER_DATA_DIR", APP_DIR / "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = Path(os.getenv("PLANNER_DB_PATH", DATA_DIR / "planner.db"))
-TZ = ZoneInfo("Asia/Kolkata")
-TODAY = datetime.now(TZ).date()
-
-st.set_page_config(
-    page_title="My Progress OS",
-    page_icon="🌱",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown(
-    """
-    <style>
-      :root { color-scheme: light; }
-      .stApp { background: #f7f8fb; color: #1f2937; }
-      [data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e7eaf0; }
-      [data-testid="stHeader"] { background: rgba(247,248,251,.88); }
-      .block-container { max-width: 1180px; padding-top: 1.5rem; padding-bottom: 3rem; }
-      .hero { background: linear-gradient(115deg,#ffffff,#eef4ff); border: 1px solid #e4eaf5; border-radius: 22px; padding: 1.35rem 1.5rem; margin-bottom: 1rem; }
-      .muted { color: #64748b; font-size: .9rem; }
-      .smallcaps { letter-spacing: .12em; text-transform: uppercase; color: #64748b; font-size: .72rem; font-weight: 700; }
-      div[data-testid="stMetric"] { background: white; border: 1px solid #e8ebf1; padding: 14px 16px; border-radius: 16px; }
-      div.stButton > button, div.stDownloadButton > button { border-radius: 10px; }
-      .stTabs [data-baseweb="tab"] { height: 42px; }
-      [data-testid="stForm"] { background: white; border: 1px solid #e8ebf1; padding: 1rem; border-radius: 16px; }
-      .note { background: #fff; border: 1px solid #e8ebf1; padding: 12px 14px; border-radius: 14px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-@contextmanager
-def db() -> Any:
-    conn = sqlite3.connect(DB_PATH, timeout=20)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-def init_db() -> None:
-    with db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS weekly_goals (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              title TEXT NOT NULL,
-              detail TEXT DEFAULT '',
-              start_date TEXT NOT NULL,
-              end_date TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'Not started',
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS daily_goals (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              goal_date TEXT NOT NULL,
-              title TEXT NOT NULL,
-              specific TEXT DEFAULT '',
-              measurable TEXT DEFAULT '',
-              achievable TEXT DEFAULT '',
-              relevant TEXT DEFAULT '',
-              time_bound TEXT DEFAULT '',
-              planned_time TEXT DEFAULT '',
-              status TEXT NOT NULL DEFAULT 'Planned',
-              outcome TEXT DEFAULT '',
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS habits (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL UNIQUE,
-              category TEXT DEFAULT 'Personal',
-              active INTEGER NOT NULL DEFAULT 1,
-              sort_order INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS habit_logs (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
-              log_date TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'Done',
-              note TEXT DEFAULT '',
-              UNIQUE(habit_id, log_date)
-            );
-            CREATE TABLE IF NOT EXISTS workout_logs (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              workout_date TEXT NOT NULL,
-              activity TEXT NOT NULL,
-              duration_minutes INTEGER,
-              kind TEXT NOT NULL DEFAULT 'Training',
-              notes TEXT DEFAULT '',
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS projects (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              area TEXT NOT NULL DEFAULT 'Personal',
-              status TEXT NOT NULL DEFAULT 'In progress',
-              next_action TEXT DEFAULT '',
-              notes TEXT DEFAULT '',
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS milestones (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              achieved_on TEXT NOT NULL,
-              category TEXT NOT NULL DEFAULT 'Skill',
-              notes TEXT DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS reviews (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              week_start TEXT NOT NULL UNIQUE,
-              went_well TEXT DEFAULT '',
-              next_focus TEXT DEFAULT '',
-              created_at TEXT NOT NULL
-            );
-            """
-        )
-        # Seed once, without overwriting the user's later edits.
-        if conn.execute("SELECT COUNT(*) FROM habits").fetchone()[0] == 0:
-            default_habits = [
-                ("Review today's main goal", "Planning", 1),
-                ("Reading", "Learning", 2),
-                ("MIT course / focused study", "Learning", 3),
-                ("Writing session", "Creative work", 4),
-                ("Movement or planned recovery", "Well-being", 5),
+der) VALUES(?,?,?)",
+                default_habits,
+            )
+        if conn.execute("SELECT COUNT(*) FROM weekly_goals").fetchone()[0] == 0:
+            conn.executemany(
+                "INSERT INTO weekly_goals(title,detail,start_date,end_date,status,created_at) VALUES(?,?,?,?,?,?)",
+                [
+                    ("Follow my planned workout and recovery routine", "Keep the week balanced; include recovery and adjust for sleep, soreness or school demands.", "2026-11-09", "2026-11-15", "In progress", now_text()),
+                    ("Practise SMART goal planning", "Practise writing and reviewing one clear SMART goal each day from November 9 to November 12.", "2026-11-09", "2026-11-12", "In progress", now_text()),
+                ],
+            )
+        if conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0:
+            projects = [
+                ("Rylo manuscript — Chapter 8", "Writing", "In progress", "Resume from page 101; draft the next scene", "The Facility, the Fates, Camp Abstract and the pendrive thread.", now_text()),
+                ("MIT Computational Data Science in Physics", "Learning", "In progress", "Continue the current lesson and capture one concept learned", "Track learning milestones rather than hours alone.", now_text()),
+                ("TheLiterary main website", "Website", "Blocked", "Recover access to the existing main account", "The site still exists; it is locked/inaccessible because of account access issues. It is not destroyed.", now_text()),
+                ("ShubhBooks promotional website", "Website", "In progress", "Review Search Console queries and page indexing", "Promotional site: shubhbooks.lovable.app.", now_text()),
+                ("Calisthenics skill progression", "Fitness", "In progress", "Follow a balanced, supervised plan and allow recovery", "Track skill practice and recovery; do not turn personal records into routine targets.", now_text()),
             ]
             conn.executemany(
-                "INSERT INTO habits(name, category, sort_or
+                "INSERT INTO projects(name,area,status,next_action,notes,created_at) VALUES(?,?,?,?,?,?)",
+                projects,
+            )
+        if conn.execute("SELECT COUNT(*) FROM milestones").fetchone()[0] == 0:
+            milestones = [
+                ("Tuck L-sit — 10 seconds", "2026-11-09", "Calisthenics", "User-reported skill milestone."),
+                ("Frogstand and advanced frogstand", "2026-11-09", "Calisthenics", "User-reported skill milestones."),
+                ("Unassisted crow pose", "2026-11-09", "Calisthenics", "User-reported skill milestone."),
+                ("Tuck front lever", "2026-11-07", "Calisthenics", "User-reported skill milestone."),
+                ("Elbow lever", "2026-11-09", "Calisthenics", "User-reported skill milestone."),
+            ]
+            milestones.append(("Implementation backlog baseline: 2 of 4 goals completed", "2026-11-10", "Planning", "Two goals completed; two were still outstanding when the tracker was discussed."))
+            conn.executemany(
+                "INSERT INTO milestones(name,achieved_on,category,notes) VALUES(?,?,?,?)",
+                milestones,
+            )
+
+
+def rows(query: str, params: tuple = ()) -> list[sqlite3.Row]:
+    with db() as conn:
+        return conn.execute(query, params).fetchall()
+
+
+def one(query: str, params: tuple = ()) -> sqlite3.Row | None:
+    with db() as conn:
+        return conn.execute(query, params).fetchone()
+
+
+def run(query: str, params: tuple = ()) -> int:
+    with db() as conn:
+        cur = conn.execute(query, params)
+        return int(cur.lastrowid or 0)
+
+
+def now_text() -> str:
+    return datetime.now(TZ).isoformat(timespec="seconds")
+
+
+def save_habit_status(habit_id: int, log_date: date, status: str) -> None:
+    run(
+        """INSERT INTO habit_logs(habit_id,log_date,status) VALUES(?,?,?)
+           ON CONFLICT(habit_id,log_date) DO UPDATE SET status=excluded.status""",
+        (habit_id, log_date.isoformat(), status),
+    )
+
+
+def save_habit_checkbox(habit_id: int, log_date: date, key: str) -> None:
+    status = "Done" if st.session_state.get(key, False) else "Not done"
+    save_habit_status(habit_id, log_date, status)
+
+
+def status_badge(status: str) -> str:
+    return {
+        "Done": "✅",
+        "Completed": "✅",
+        "In progress": "🟦",
+        "Planned": "🕓",
+        "Partial": "🟨",
+        "Rescheduled": "↪️",
+        "Not started": "⚪",
+        "Blocked": "⛔",
+        "Skipped": "—",
+    }.get(status, "•")
+
+
+def metric_counts() -> tuple[int, int, int]:
+    week_start = TODAY - timedelta(days=TODAY.weekday())
+    week_end = week_start + timedelta(days=6)
+    active = one(
+        "SELECT COUNT(*) AS n FROM weekly_goals WHERE end_date>=? AND start_date<=? AND status!='Done'",
+        (week_start.isoformat(), week_end.isoformat()),
+    )["n"]
+    today_goals = one(
+        "SELECT COUNT(*) AS n FROM daily_goals WHERE goal_date=?",
+        (TODAY.isoformat(),),
+    )["n"]
+    done_habits = one(
+        "SELECT COUNT(*) AS n FROM habit_logs WHERE log_date=? AND status='Done'",
+        (TODAY.isoformat(),),
+    )["n"]
+    return int(active), int(today_goals), int(done_habits)
+
+
+def login_gate() -> bool:
+    configured = os.getenv("PLANNER_PASSWORD", "")
+    if not configured:
+        st.error("Planner password is not configured yet.")
+        st.markdown(
+            "Add a secret named `PLANNER_PASSWORD` in your hosting provider's Secrets settings. "
+            "For local testing, copy `.env.example` to `.env` and set a private password. "
+            "Do not share the password in chat or commit it to your project."
+        )
+        return False
+    if st.session_state.get("authenticated"):
+        return True
+    st.markdown("<div class='hero'><div class='smallcaps'>Private workspace</div><h1>My Progress OS</h1><p class='muted'>A calm place for goals, projects and progress.</p></div>", unsafe_allow_html=True)
+    with st.form("login_form"):
+        password = st.text_input("Planner password", type="pas
